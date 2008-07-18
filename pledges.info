@@ -1,0 +1,5 @@
+; $Id: on_vocabulary.info,v 0.1 2007/12/13 jystewart $
+name = Pledges Support
+description = Provide a way to set up pledges that users can make
+project = pledges
+package = Misc

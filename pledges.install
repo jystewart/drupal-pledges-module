@@ -1,0 +1,46 @@
+<?php
+// $Id $
+
+function pledges_install() {
+  db_query("CREATE TABLE {pledges} (
+    `pledge_id` int NOT NULL auto_increment primary key,
+    `title` varchar(255) NOT NULL,
+    `body` text,
+    `thankyou_body` text,
+    `active_from` datetime,
+    `active_until` datetime,
+    `created_at` datetime,
+    `updated_at` timestamp,
+    `uid` int NOT NULL
+  )");
+  db_query("CREATE TABLE {pledge_options} (
+    `pledge_option_id` int NOT NULL auto_increment primary key,
+    `pledge_id` int NOT NULL,
+    `option_name` varchar(255) NOT NULL,
+    `option_description` text,
+    `created_at` datetime,
+    `updated_at` timestamp
+  )");
+  db_query("CREATE TABLE {users_pledges} (
+    `pledge_option_id` int NOT NULL,
+    `uid` int NOT NULL,
+    `created_at` timestamp
+  )");
+}
+
+function pledges_update_1() {
+  db_query("ALTER TABLE {pledges} ADD COLUMN `excerpt` varchar(255)");
+}
+
+function pledges_update_2() {
+  db_query("ALTER TABLE {pledges} ADD COLUMN `make_commitments_public` boolean not null default 0");
+  db_query("ALTER TABLE {pledges} ADD COLUMN `display_totals_publicly` boolean not null default 0");
+}
+
+function pledges_update_3() {
+  db_query("ALTER TABLE {users_pledges} CHANGE COLUMN `uid` `uid` int null");
+  db_query("ALTER TABLE {users_pledges} ADD COLUMN `signatory_name` varchar(255)");
+  db_query("ALTER TABLE {users_pledges} ADD COLUMN `signatory_email` varchar(255)");
+  db_query("ALTER TABLE {pledges} ADD COLUMN `anonymous_signup_text` text");
+  db_query("CREATE INDEX `user_pledge_option_id` ON `users_pledges` (`pledge_option_id`)");
+}

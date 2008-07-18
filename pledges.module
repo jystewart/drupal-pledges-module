@@ -1,0 +1,655 @@
+<?php
+// $Id: pledges.module,v 0.1 2008/05/19 jystewart $
+
+/**
+ * Implementation of hook_help
+ *
+ * @return string
+ */
+function pledges_help($section) {
+  
+}
+
+/**
+ * Implementation of hook_perm
+ *
+ * @return string
+ */
+function pledges_perm() {
+  return array('manage pledges', 'commit to pledges', 'view pledges', 'view all commitments');
+}
+
+
+/**
+ * Implementation of hook_menu
+ *
+ * @return array
+ */
+function pledges_menu($may_cache) {
+  $items = array();
+  if ($may_cache) {
+    $r = db_query("SELECT `pledge_id`, `title` FROM {pledges} ORDER BY `pledge_id`");
+    while ($p = db_fetch_object($r)) {
+      $items[] = array(
+        'path' => 'pledges/' . $p->pledge_id,
+        'title' => $p->title,
+        'callback' => 'pledges_page',
+        'access' => user_access('view pledges'),
+        'type' => MENU_CALLBACK,
+        'callback arguments' => array('id' => $p->pledge_id));
+      $items[] = array(
+        'path' => 'pledges/' . $p->pledge_id . '/commitments',
+        'title' => 'Commitments to ' . $p->title,
+        'callback' => 'pledges_commitments_page',
+        'access' => user_access('view all commitments') || $p->make_commitments_public == 1,
+        'type' => MENU_CALLBACK,
+        'callback arguments' => array('id' => $p->pledge_id));
+    }
+    $items[] = array(
+      'path' => 'pledges',
+      'title' => 'Current Pledges',
+      'callback' => 'pledges_list',
+      'access' =>  user_access('view pledges'),
+      'type' => MENU_CALLBACK
+    );
+    $items[] = array(
+      'path' => 'pledges/thankyou',
+      'title' => 'Thank You For Pledging',
+      'callback' => 'pledges_thankyou_page',
+      'access' => user_access('commit to pledges'),
+      'type' => MENU_CALLBACK);
+    $items[] = array(
+      'path' => 'admin/settings/pledges',
+      'title' => t('Settings for Pledges module'),
+      'callback' => 'pledges_admin_list',
+      'access' => user_access('manage pledges'),
+      'type' => MENU_NORMAL_ITEM);
+    $items[] = array(
+      'path' => 'admin/settings/pledges/delete',
+      'title' => 'Pledge Management',
+      'callback' => 'pledges_admin_delete',
+      'access' => user_access('manage pledges'),
+      'type' => MENU_CALLBACK);
+    $items[] = array(
+      'path' => 'admin/settings/pledges/edit',
+      'title' => 'Pledge Management',
+      'callback' => 'pledges_admin_edit',
+      'access' => user_access('manage pledges'),
+      'type' => MENU_CALLBACK);
+  }
+  return $items;
+}
+
+function pledges_admin_list() {
+  $active_pledges = "SELECT `p`.*, COUNT(`po`.`pledge_option_id`) AS options
+    FROM {pledges} p
+    LEFT JOIN {pledge_options} po ON `po`.`pledge_id` = `p`.`pledge_id` 
+    GROUP BY `p`.`pledge_id`
+    ORDER BY `created_at`";
+  $q = pager_query($active_pledges, 20);
+  return theme('pledges_admin_list', $q);
+}
+
+function pledges_list() {
+  $active_pledges = "SELECT `p`.*, COUNT(`po`.`pledge_option_id`) AS options
+    FROM {pledges} p
+    LEFT JOIN {pledge_options} po ON `po`.`pledge_id` = `p`.`pledge_id` 
+    GROUP BY `p`.`pledge_id`
+    ORDER BY `created_at`";
+  $q = db_query($active_pledges);
+  return theme('pledges_list', $q);
+}
+
+function theme_pledges_list($pledges) {
+  $out = '<h2>Currently Active Pledges</h2>';
+  $out .= '<ul>';
+  while ($pledge = db_fetch_object($pledges)) {
+    $out .= '<li>';
+    $out .= '<h3>' . l($pledge->title, 'pledges/' . $pledge->pledge_id) . '</h3>';
+    $out .= '<p>' . $plesdge->description . '</p>';
+    $out .= '</li>';
+  }
+  $out .= '</ul>';
+  return $out;
+}
+
+function theme_pledges_admin_list($pledges) {
+  $out = '<p><a href="/admin/settings/pledges/edit">Create A New Pledge</a></p>';
+  $out .= '<table><thead>';
+  $out .= '<tr><th>Title</th><th>Active From</th><th>Active Until</th><th>Options</th><th>Actions</th></tr>';
+  $out .= '</thead><tbody>';
+  while ($pledge = db_fetch_object($pledges)) {
+    $out .= '<tr>';
+    $out .= '<td>' . $pledge->title . '</td>';
+    $out .= '<td>' . date('dS M Y', strtotime($pledge->active_from)) . '</td>';
+    $out .= '<td>' . date('dS M Y', strtotime($pledge->active_until)) . '</td>';
+    $out .= '<td>' . $pledge->options . '</td>';
+    $out .= '<td><a href="' . url('admin/settings/pledges/edit/' . $pledge->pledge_id) . 
+      '">Edit</a> | <a href="' . url('admin/settings/pledges/delete/' . $pledge->pledge_id) . '">Delete</a> | <a href="' . url('pledges/' . $pledge->pledge_id . '/commitments'). '">View commitments</a></td>';
+    $out .= '</tr>';
+  }
+  $out .= '</tbody></table>';
+  $out .= theme('pager', NULL, 20);
+  return $out;
+}
+
+function pledges_edit($pledge) {
+  $form = array();
+  $form['meta'] = array(
+    '#title' => t('Pledge Information'),
+    '#type' => 'fieldset');
+  if ($pledge) {
+    $form['meta']['pledge_id'] = array(
+      '#type' => 'hidden',
+      '#default_value' => $pledge->pledge_id);
+  }
+  $form['meta']['title'] = array(
+    '#title' => t('Title'),
+    '#type' => 'textfield',
+    '#description' => t('Give your pledge a name'),
+    '#default_value' => $pledge->title);
+  $form['meta']['excerpt'] = array(
+    '#title' => t('Summary'),
+    '#type' => 'textarea',
+    '#description' => t('This will be shown in lists and in the pledges block'),
+    '#default_value' => $pledge->excerpt);
+  $form['meta']['body'] = array(
+    '#title' => t('Body'),
+    '#type' => 'textarea',
+    '#description' => t('An introduction to your pledge'),
+    '#default_value' => $pledge->body);
+  $form['meta']['thankyou_body'] = array(
+    '#title' => t('Thank You Page Content'),
+    '#type' => 'textarea',
+    '#default_value' => $pledge->body);
+  $form['meta']['anonymous_signup_text'] = array(
+    '#title' => t('Text to display after an anonymous user pledges'),
+    '#type' => 'textarea',
+    '#default_value' => $pledge->anonymous_signup_text);
+  $form['meta']['display_totals_publicly'] = array(
+    '#title' => t('Display Totals Publicly?'),
+    '#type' => 'checkbox',
+    '#default_value' => $pledge->display_totals_publicly);
+  $form['meta']['make_commitments_public'] = array(
+    '#title' => t('Make the list of commitments public?'),
+    '#type' => 'checkbox',
+    '#default_value' => $pledge->make_commitments_public);
+  $form['meta']['active_from'] = array(
+    '#title' => t('Active From'),
+    '#type' => 'date',
+    '#description' => t("The day when the pledge becomes available for people to sign up to"),
+    '#default_value' => $pledge->active_from_mapped);
+
+  $form['meta']['active_until'] = array(
+    '#title' => t('Active Until'),
+    '#type' => 'date',
+    '#description' => t("The last day when the pledge is available for people to sign up to"),
+    '#default_value' => $pledge->active_until_mapped);
+
+  if (! empty($pledge->options)) {
+    for ($i = 0; $i <= count($pledge->options) - 1; $i++) {
+      $prefix = 'options_' . $i;
+      $form[$prefix] = array(
+        '#title' => t('Pledge Option'),
+        '#type' => 'fieldset');
+      $form[$prefix]['options[' . $i . '][pledge_option_id]'] = array(
+        '#type' => 'hidden',
+        '#default_value' => $pledge->options[$i]->pledge_option_id);
+      $form[$prefix]['options[' . $i . '][option_name]'] = array(
+        '#title' => t('Option Name'),
+        '#type' => 'textfield',
+        '#default_value' => $pledge->options[$i]->option_name);
+      $form[$prefix]['options[' . $i . '][option_description]'] = array(
+        '#title' => t('Option Description'),
+        '#type' => 'textarea',
+        '#default_value' => $pledge->options[$i]->option_description);
+    }
+  }
+  $i = count($pledge->options);
+  $form['options_' . $i] = array(
+    '#title' => t('Pledge Option'),
+    '#type' => 'fieldset');
+  $form['options_' . $i]['options[' . $i .'][option_name]'] = array(
+    '#title' => t('Option Name'),
+    '#type' => 'textfield');
+  $form['options_' . $i]['options[' . $i . '][option_description]'] = array(
+    '#title' => t('Option Description'),
+    '#type' => 'textarea');
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Submit'));
+  return $form;
+}
+
+function pledges_edit_validate($form_id, $form_values) {
+  if (empty($form_values['title'])) {
+    form_set_error('title', t('A title is required'));
+  } 
+}
+
+function pledges_edit_submit($form_id, $form_values) {
+  # Check if we have an ID 
+  # If we do:
+  # -- UPDATE existing value
+  # Else:
+  $from = sprintf("%04d-%02d-%02d 00:00:00", $form_values['active_from']['year'], 
+    $form_values['active_from']['month'], $form_values['active_from']['day']);
+  $until = sprintf("%04d-%02d-%02d 00:00:00", $form_values['active_until']['year'], 
+    $form_values['active_until']['month'], $form_values['active_until']['day']);
+    
+  if (! empty($form_values['pledge_id'])) {
+    $res = db_query("REPLACE INTO {pledges} (`pledge_id`, `title`, `excerpt`, `body`, `thankyou_body`, `active_from`, `active_until`, `make_commitments_public`, `display_totals_publicly`) 
+      VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', %d, %d)",
+      $form_values['pledge_id'], $form_values['title'], $form_values['excerpt'], 
+      $form_values['body'], $form_values['thankyou_body'], $from, $until, 
+      $form_values['make_commitments_public'], $form_values['display_totals_publicly']);
+    $pledge_id = $form_values['pledge_id'];
+  } else {
+    $pledge_id = db_next_id('pledges');
+    $res = db_query("INSERT INTO {pledges} (`pledge_id`, `title`, `excerpt`, `body`, `thankyou_body`, `active_from`, `active_until`, `created_at`, `make_commitments_public`, `display_totals_publicly`)
+      VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', NOW(), %d, %d)",
+      $pledge_id, $form_values['title'], $form_values['excerpt'], $form_values['body'], 
+      $form_values['thankyou_body'], $from, $until, $form_values['make_commitments_public'], 
+      $form_values['display_totals_publicly']);
+  }
+  
+  # Iterate over pledge options
+  # I can't find a nice way to do this with drupal's form API so am having to
+  # break through to the HTTP response
+  foreach ($_POST['options'] as $pledge_option) {
+    if (! empty($pledge_option['pledge_option_id'])) {
+      if (empty($pledge_option['option_name']) && empty($pledge_option['option_description'])) {
+        $res2 = db_query("DELETE FROM {pledge_options} WHERE `pledge_option_id` = %d", $pledge_option['pledge_option_id']);
+      } else {
+        $res2 = db_query("REPLACE INTO {pledge_options} (`pledge_id`, `pledge_option_id`, `option_name`, `option_description`)
+          VALUES (%d, %d, '%s', '%s')", $pledge_id, $pledge_option['pledge_option_id'], $pledge_option['option_name'], 
+          $pledge_option['option_description']);
+      }
+    } else {
+      if (! empty($pledge_option['option_name'])) {
+        $res2 = db_query("INSERT INTO {pledge_options} (`pledge_id`, `option_name`, `option_description`, `created_at`)
+          VALUES (%d, '%s', '%s', NOW())", $pledge_id, $pledge_option['option_name'], 
+          $pledge_option['option_description']);        
+      }
+    }
+  }
+
+  return 'admin/settings/pledges';
+}
+
+function pledges_load_by_option_id($option_id) {
+  $query = db_query('SELECT p.* FROM {pledges} p, {pledge_options} po WHERE p.pledge_id = po.pledge_id AND po.pledge_option_id = %d', $option_id);
+  $result = db_fetch_object($query);
+  return $result;
+}
+
+function pledges_load($id) {
+  $query = db_query('SELECT * FROM {pledges} p WHERE `pledge_id` = %d', $id);
+  $res = db_fetch_object($query);
+  if (is_object($res)) {
+    foreach (array('active_from', 'active_until') as $attribute) {
+      $parsed = strtotime($res->$attribute);
+      $new_var_name = $attribute . '_mapped';
+      $res->$new_var_name = array(
+        'month' => date('n', $parsed),
+        'day' => date('j', $parsed),
+        'year' => date('Y', $parsed));
+    }
+    $options = db_query('SELECT * FROM {pledge_options} po WHERE `pledge_id` = %d', $id);
+    $res->options = array();
+    while ($option = db_fetch_object($options)) {
+      array_push($res->options, $option);
+    }
+  }
+
+  return $res;
+}
+
+function pledges_commitments_load($pledge, $limit = 50) {
+  $sql = sprintf('SELECT `u`.`name`, `u`.`uid`, `po`.`option_name`, `up`.`signatory_name` 
+    FROM {pledge_options} po,  {users_pledges} up
+    LEFT OUTER JOIN {users} u ON `u`.`uid` = `up`.`uid`
+    WHERE `po`.`pledge_id` = %d AND `up`.`pledge_option_id` = `po`.`pledge_option_id`', $pledge->pledge_id);
+
+  $query = pager_query($sql, $limit);
+  $results = array();
+  while ($res = db_fetch_object($query)) {
+    array_push($results, $res);
+  }
+  return $results;
+}
+
+function pledges_admin_edit($id = FALSE) {
+  drupal_add_js(drupal_get_path('module', 'pledges') . '/pledges.js'); 
+  if ($id) {
+    $pledge = pledges_load($id);
+  }
+  $form = drupal_get_form('pledges_edit', $pledge);
+  return theme('pledges_admin_edit', $form);
+}
+
+function theme_pledges_admin_edit($form) {
+  $output = $form;
+  return $output;
+}
+
+function pledges_commitments_page($id) {
+  global $user;
+  $pledge = pledges_load($id);
+  if (! $pledge || (! $pledge->make_commitments_public && ! user_access('manage pledges'))) {
+    drupal_not_found();
+  }
+  
+  if ($user->uid == 0) {
+    $has_made_pledge = FALSE;
+  } else {
+    $has_made_pledge = pledges_user_has_pledged($pledge, $user);
+  }
+  
+  $commitments = pledges_commitments_load($pledge);
+  return theme('pledges_commitments_page', $pledge, $user, $has_made_pledge, $commitments);
+}
+
+function pledges_page($id) {
+  global $user;
+  $pledge = pledges_load($id);
+  if (! $pledge) {
+    drupal_not_found();
+  }
+
+  if ($user->uid == 0) {
+    $has_made_pledge = FALSE;
+  } else {
+    $has_made_pledge = pledges_user_has_pledged($pledge, $user);
+  }
+
+  $commitments = $pledge->make_commitments_public ? pledges_commitments_load($pledge, 10) : NULL;
+    
+  return theme('pledges_page', $pledge, $user, $has_made_pledge, $commitments);
+}
+
+function pledges_commit($pledge_option) {
+  global $user;
+  $form = array();
+  $form['pledge_option_id'] = array(
+    '#type' => 'hidden',
+    '#default_value' => $pledge_option->pledge_option_id);
+  if ($user->uid == 0) {
+    $form['signatory_name'] = array(
+      '#title' => t('Your Name'),
+      '#type' => 'textfield',
+      '#required' => TRUE);
+    $form['signatory_email'] = array(
+      '#title' => t('Your Email Address'),
+      '#type' => 'textfield',
+      '#required' => TRUE,
+      '#validate' => array('is_valid_email' => array('email')));
+  }
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#default_value' => "I Make This Pledge");
+  return $form;
+}
+
+function pledges_user_has_pledged($pledge, $user) {
+  $check = db_query('SELECT * FROM {users_pledges} up, {pledge_options} po, {pledges} p WHERE
+    `p`.`pledge_id` = `po`.`pledge_id` AND `po`.`pledge_option_id` = `up`.`pledge_option_id` AND 
+    `up`.`uid` = %d AND `p`.`pledge_id` = %d',
+    $user->uid, $pledge->pledge_id);
+  return db_num_rows($check) > 0;
+}
+
+function pledges_load_for_user($user) {
+  $check = db_query('SELECT p.pledge_id, p.title, po.option_name, up.created_at 
+      FROM {users_pledges} up, {pledge_options} po, {pledges} p WHERE
+    `p`.`pledge_id` = `po`.`pledge_id` AND `po`.`pledge_option_id` = `up`.`pledge_option_id` AND 
+    `up`.`uid` = %d', $user->uid);
+  if (db_num_rows($check) > 0) {
+    return $check;
+  }
+
+  return FALSE;  
+}
+
+function pledges_pledge_is_past($pledge) {
+  return strtotime($pledge->active_until) < time();
+}
+
+function pledges_anonymous_user_has_pledged($name, $email, $pledge_option_id) {
+  $pledge = pledges_load_by_option_id($pledge_option_id);
+  $check = db_query("SELECT * FROM `users_pledges`, `pledge_options` 
+    WHERE `signatory_name` = '%s' AND `signatory_email` = '%s' AND %d IN (
+      SELECT pledge_option_id FROM pledge_options WHERE pledge_id = %d)",
+    $name, $email, $pledge_option_id, $pledge->pledge_id);
+  return db_num_rows($check) > 0;
+}
+
+function pledges_email_matches_existing_user($email) {
+  $matching_user = user_load(array('mail' => $email));
+  return $matching_user ? $matching_user : FALSE;
+}
+
+function pledges_commit_validate($form_id, $form_values) {
+  global $user;
+  $pledge = pledges_load_by_option_id($form_values['pledge_option_id']);
+  if (pledges_pledge_is_past($pledge)) {
+    drupal_access_denied();
+  }
+  if ($user->uid == 0) {
+    if (pledges_anonymous_user_has_pledged($form_values['signatory_name'], 
+      $form_values['signatory_email'], $form_values['pledge_option_id'])) {
+        form_set_error('', t('You appear to have already made this pledge!'));
+    }
+    
+    if (pledges_email_matches_existing_user($form_values['signatory_email'])) {
+      form_set_error('', t("We seem to have an existing member with that email address. 
+        If that's you we'd encourage you to log in and then pledge again."));
+    }
+    
+  } else {
+    if (pledges_user_has_pledged($pledge, $user)) {
+      drupal_access_denied();
+    }
+  }
+}
+
+function pledges_commit_submit($form_id, $form_values) {
+  global $user;
+  if ($user->uid == 0) {
+    $sql = db_query("INSERT INTO {users_pledges} (`pledge_option_id`, `uid`, `created_at`,
+      `signatory_name`, `signatory_email`) VALUES (%d, NULL, NOW(), '%s', '%s')", 
+      $form_values['pledge_option_id'], $form_values['signatory_name'],
+      $form_values['signatory_email']);
+  } else {
+    $sql = db_query('INSERT INTO {users_pledges} (`pledge_option_id`, `uid`, `created_at`) 
+      VALUES (%d, %d, NOW())', $form_values['pledge_option_id'], $user->uid);
+  }
+
+  $pledge = pledges_load_by_option_id($form_values['pledge_option_id']);
+  
+  return url('pledges/thankyou/' . $pledge->pledge_id);
+}
+
+function theme_pledges_page($pledge, $user, $has_made_pledge, $commitments = FALSE) {
+  $out .= '<p>' . $pledge->body . '</p>';
+  
+  if ($has_made_pledge) {
+    $out .= '<p class="pledge-made"><strong>You have made this pledge.</strong></p>';
+    $out .= '<hr />';
+    $out .= '<h3>Pledge Details</h3>';
+  } else {
+    $out .= '<h3>Make The Pledge</h3>';
+  }
+  
+  
+  if (! empty($pledge->options)) {
+    foreach ($pledge->options as $option) {
+      $out .= '<div class="pledge-option" style="border-bottom: 1px dotted black; padding: 1.5em 0px">';
+      $out .= '<h4>' . $option->option_name . '</h4>';
+      $out .= '<p>' . $option->option_description . '</p>';
+      if (! $has_made_pledge && ! pledges_pledge_is_past($pledge)) {
+        $out .= drupal_get_form('pledges_commit', $option);
+        if ($user->uid == 0) {
+        $out .= '<p>Already registered with the Operation Noah website? 
+          <a href="' . url('user') .'">Log In</a> to make the pledge</p>';
+        }
+      }
+
+      $out .= '</div>';
+    }
+  }
+  
+  if ($commitments) {
+    $out .= '<h3>Recent Commitments</h3>';
+    $out .= theme('pledges_commitment_list', $commitments);
+    $out .= '<p>' . l('View all', 'pledges/' . $pledge->pledge_id . '/commitments') . '</p>';
+  }
+  return $out;
+}
+
+function theme_pledges_commitment_list($commitments) {
+  $out = '<ul>';
+  foreach ($commitments as $commitment) {
+    if ($commitment->uid && user_access('access user profiles')) {
+      $out .= '<li>' . l($commitment->name, 'user/' . $commitment->uid) . '</li>';
+    } else if ($commitment->uid) {
+      $out .= '<li>' . $commitment->name . '</li>';
+    } else {
+      $out .= '<li>' . $commitment->signatory_name . '</li>';
+    }
+  }
+  $out .= '</ul>';
+  return $out;
+}
+
+function theme_pledges_commitments_page($pledge, $user, $has_made_pledge, $commitments = FALSE) {
+  $out .= '<p>' . $pledge->body . '</p>';
+  
+  if ($has_made_pledge) {
+    $out .= '<p class="pledge-made"><strong>You have made this pledge.</strong></p>';
+  }
+  
+  $out .= '<p>' . l('Return to pledge page', 'pledges/' . $pledge->pledge_id) . '.</p>';
+  
+  $out .= '<h3>Commitments</h3>';
+  $out .= theme('pledges_commitment_list', $commitments);
+  $out .= theme('pager', NULL, 50);
+  return $out;
+}
+
+function pledges_admin_delete($id) {
+  $pledge = pledges_load($id);
+  if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    $sql = db_query('DELETE FROM {pledges} WHERE pledge_id = %d', $id);
+    $sql = db_query('DELETE FROM {pledge_options} WHERE pledge_id = %d', $id);
+    drupal_set_message('Pledge deleted');
+    drupal_goto(url('admin/settings/pledges'));
+  }
+  return theme('pledges_admin_delete', $pledge);
+}
+
+function theme_pledges_admin_delete($pledge) {
+  $out = '<h2>Are you sure?</h2>';
+  $out .= '<p>Are you sure you want to delete the pledge <strong>' . $pledge->title . '</strong>? All records of pledges made will be lost.</p>';
+  $out .= '<p><a href="' . url('admin/settings/pledges') .'">Click here to return to the pledge list</a></p>';
+  $out .= '<form method="POST">';
+  $out .= '<input type="submit" value="Yes! Delete it" />';
+  $out .= '</form>';
+  return $out;
+}
+
+function theme_pledges_for_user($pledges) {
+  $out = '<ul>';
+  while ($pledge = db_fetch_object($pledges)) {
+    $on = date('dS M Y', strtotime($pledge->created_at));
+    $out .= '<li>Joined the <a href="' . url('pledges/' . $pledge->pledge_id ). '">' . $pledge->title . '</a>';
+    $out .= ' at the ' . $pledge->option_name . ' level on the ' . $on . '</li>';
+  }
+  $out .= '</ul>';
+  return $out;
+}
+
+function theme_pledges_latest_block($pledge) {
+  return $pledge->excerpt . l('Find out more', 'pledges/' . $pledge->pledge_id);
+}
+
+function pledges_load_latest() {
+  $query = db_query("SELECT * FROM {pledges} ORDER BY `created_at` DESC LIMIT 1");
+  if (db_num_rows($query) == 1) {
+    return db_fetch_object($query);
+  }
+}
+
+function pledges_block($op = 'list', $delta = 0, $edit = array()) {
+  switch ($op) {
+    case 'list':
+      $blocks[0]['info'] = t('Latest Pledge');
+      $blocks[1]['info'] = t('Active Pledges');
+      return $blocks;
+      break;
+    case 'view':
+      switch ($delta) {
+        case 0:
+          $pledge = pledges_load_latest();
+          $block = array(
+            'subject' => t($pledge->title),
+            'content' => theme('pledges_latest_block', $pledge));
+          break;
+        case 1:
+          $block = array(
+            'subject' => t('Active Pledges'),
+            'content' => 'coming soon');
+          break;
+      }
+      return $block;
+    
+  }
+}
+/**
+ * Implementation of hook_user
+ *
+ * We use this to find new ON users whose email address matches an existing pledger.
+ * We then make the link with the existing pledger so they get the badge on their profile.
+ *
+ * We also use this to display pledges on the user's profile page
+ */
+function pledges_user($type, &$edit, &$user, $category = NULL) {
+  switch ($type) {
+
+    case 'insert':
+      db_query("UPDATE `users_pledges` SET `uid` = %d WHERE `signatory_email` = '%s' AND `uid` IS NULL", $edit['uid'], $edit['mail']);
+      break;
+    case 'view':
+      $pledges = pledges_load_for_user($user);
+      if ($pledges) {
+        $items['pledges'] = array(
+          'title' => t('Pledges'),
+          'value' => theme('pledges_for_user', $pledges));
+        return array(t('History') => $items);
+      }
+  }
+}
+
+function pledges_thankyou_page($pledge_id) {
+  global $user;
+  $pledge = pledges_load($pledge_id);
+  
+  if (pledges_user_has_pledged($pledge, $user) || $user->uid == 0) {
+    return theme('pledges_thankyou_page', $pledge);
+  } else {
+    drupal_access_denied();
+  }
+}
+
+function theme_pledges_thankyou_page($pledge) {
+  $out = '<p>' . $pledge->thankyou_body . '</p>';
+  if ($user->uid == 0) {
+    if (! empty($pledge->anonymous_signup_text)) {
+      $out .= '<p style="margin: 2em 0em; font-weight: bold">' . $pledge->anonymous_signup_text . '</p>';
+    } else {
+      $out .= '<p style="margin: 2em 0em; font-weight: bold">Please consider signing up for our site.</p>';
+    }
+    $out .= drupal_get_form('user_register');
+  }
+  return $out;
+}
