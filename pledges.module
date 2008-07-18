@@ -135,6 +135,7 @@ function theme_pledges_admin_list($pledges) {
 
 function pledges_edit($pledge) {
   $form = array();
+  $form['#attributes'] = array('enctype' => "multipart/form-data");
   $form['meta'] = array(
     '#title' => t('Pledge Information'),
     '#type' => 'fieldset');
@@ -179,12 +180,21 @@ function pledges_edit($pledge) {
     '#type' => 'date',
     '#description' => t("The day when the pledge becomes available for people to sign up to"),
     '#default_value' => $pledge->active_from_mapped);
-
   $form['meta']['active_until'] = array(
     '#title' => t('Active Until'),
     '#type' => 'date',
     '#description' => t("The last day when the pledge is available for people to sign up to"),
     '#default_value' => $pledge->active_until_mapped);
+  $form['meta']['thumbnail'] = array(
+    '#title' => t('Thumbnail image'),
+    '#type' => 'file',
+    '#description' => t('Click "Browse..." to select a file to upload.<br />Will be used in blocks and listings'),
+  );
+  $form['meta']['image'] = array(
+    '#title' => t('Large image'),
+    '#type' => 'file',
+    '#description' => t('Click "Browse..." to select a file to upload.<br />Will appear at the top of the pledge page'),
+  );
 
   if (! empty($pledge->options)) {
     for ($i = 0; $i <= count($pledge->options) - 1; $i++) {
@@ -227,6 +237,37 @@ function pledges_edit_validate($form_id, $form_values) {
   } 
 }
 
+/**
+ * Handle the files we may have uploaded in our process
+ */
+function pledges_process_file($filename) {
+  if (empty($_FILES)) {
+    return;
+  }
+  
+  if ($file = file_check_upload($filename)) {
+    $save = file_save_upload($file, variable_get('file_directory_path', '') . '/', $file->filename, false);
+    if (! $save) {
+      form_set_error($filename, t('There was a problem saving the uploaded %s file', 
+        array('%s' => $name)));
+    }
+    return pledges_save_file($save);
+  }
+}
+
+
+/**
+ * Saving a file to the database
+ */
+function pledges_save_file($file) {
+  $file = (array)$file;
+  $file['fid'] = db_next_id('{files}_fid');
+  db_query('INSERT into {files} (fid, nid, filename, filepath, filemime, filesize)  
+       VALUES (%d, %d, "%s","%s","%s",%d)',
+      $file['fid'], $node->nid, $file['filename'], $file['filepath'], $file['filemime'], $file['filesize']);
+  return (array)$file;
+}
+
 function pledges_edit_submit($form_id, $form_values) {
   # Check if we have an ID 
   # If we do:
@@ -236,21 +277,28 @@ function pledges_edit_submit($form_id, $form_values) {
     $form_values['active_from']['month'], $form_values['active_from']['day']);
   $until = sprintf("%04d-%02d-%02d 00:00:00", $form_values['active_until']['year'], 
     $form_values['active_until']['month'], $form_values['active_until']['day']);
-    
+  
+  $pledge = isset($form_values['pledge_id']) ? pledges_load($form_values['pledge_id']) : new stdClass;
+  foreach (array('thumbnail', 'image') as $type) {
+    $saved_file = pledges_process_file($type);
+    $form_values[$type] = $saved_file ? $saved_file['fid'] : $pledge->$type;
+  }
+
   if (! empty($form_values['pledge_id'])) {
-    $res = db_query("REPLACE INTO {pledges} (`pledge_id`, `title`, `excerpt`, `body`, `thankyou_body`, `active_from`, `active_until`, `make_commitments_public`, `display_totals_publicly`) 
-      VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', %d, %d)",
+    $res = db_query("REPLACE INTO {pledges} (`pledge_id`, `title`, `excerpt`, `body`, `thankyou_body`, `active_from`, `active_until`, `make_commitments_public`, `display_totals_publicly`, `thumbnail`, `image`) 
+      VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', %d, %d, '%s', '%s')",
       $form_values['pledge_id'], $form_values['title'], $form_values['excerpt'], 
       $form_values['body'], $form_values['thankyou_body'], $from, $until, 
-      $form_values['make_commitments_public'], $form_values['display_totals_publicly']);
+      $form_values['make_commitments_public'], $form_values['display_totals_publicly'],
+      $form_values['thumbnail'], $form_values['image']);
     $pledge_id = $form_values['pledge_id'];
   } else {
     $pledge_id = db_next_id('pledges');
-    $res = db_query("INSERT INTO {pledges} (`pledge_id`, `title`, `excerpt`, `body`, `thankyou_body`, `active_from`, `active_until`, `created_at`, `make_commitments_public`, `display_totals_publicly`)
-      VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', NOW(), %d, %d)",
+    $res = db_query("INSERT INTO {pledges} (`pledge_id`, `title`, `excerpt`, `body`, `thankyou_body`, `active_from`, `active_until`, `created_at`, `make_commitments_public`, `display_totals_publicly`, `thumbnail`, `image`)
+      VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', NOW(), %d, %d, '%s', '%s')",
       $pledge_id, $form_values['title'], $form_values['excerpt'], $form_values['body'], 
       $form_values['thankyou_body'], $from, $until, $form_values['make_commitments_public'], 
-      $form_values['display_totals_publicly']);
+      $form_values['display_totals_publicly'], $form_values['thumbnail'], $form_values['image']);
   }
   
   # Iterate over pledge options

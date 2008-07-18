@@ -44,3 +44,8 @@ function pledges_update_3() {
   db_query("ALTER TABLE {pledges} ADD COLUMN `anonymous_signup_text` text");
   db_query("CREATE INDEX `user_pledge_option_id` ON `users_pledges` (`pledge_option_id`)");
 }
+
+function pledges_update_4() {
+  db_query("ALTER TABLE {pledges} ADD COLUMN `thumbnail` int");
+  db_query("ALTER TABLE {pledges} ADD COLUMN `image` int");
+}
