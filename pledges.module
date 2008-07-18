@@ -412,8 +412,14 @@ function pledges_page($id) {
   }
 
   $commitments = $pledge->make_commitments_public ? pledges_commitments_load($pledge, 10) : NULL;
-    
-  return theme('pledges_page', $pledge, $user, $has_made_pledge, $commitments);
+  
+  if (empty($pledge->image)) {
+    $image = FALSE;
+  } else {
+    $image = db_fetch_object(db_query('SELECT * FROM files WHERE fid = %d', $pledge->image));
+  }
+  
+  return theme('pledges_page', $pledge, $user, $has_made_pledge, $image, $commitments);
 }
 
 function pledges_commit($pledge_option) {
@@ -518,7 +524,12 @@ function pledges_commit_submit($form_id, $form_values) {
   return url('pledges/thankyou/' . $pledge->pledge_id);
 }
 
-function theme_pledges_page($pledge, $user, $has_made_pledge, $commitments = FALSE) {
+function theme_pledges_page($pledge, $user, $has_made_pledge, $image = FALSE, $commitments = FALSE) {
+  $out = '';
+  if ($image) {
+    $out = '<p><img src="' . file_create_url($image->filepath) . 
+      '" alt="thumbnail image representing pledge" /></p>';    
+  }
   $out .= '<p>' . $pledge->body . '</p>';
   
   if (pledges_pledge_is_past($pledge)) {
@@ -622,8 +633,13 @@ function theme_pledges_for_user($pledges) {
   return $out;
 }
 
-function theme_pledges_latest_block($pledge) {
-  return $pledge->excerpt . l('Find out more', 'pledges/' . $pledge->pledge_id);
+function theme_pledges_latest_block($pledge, $thumbnail = false) {
+  $output = '';
+  if ($thumbnail) {
+    $output = '<p><img src="' . file_create_url($thumbnail->filepath) . 
+      '" alt="thumbnail image representing pledge" /></p>';
+  }
+  return $output . $pledge->excerpt . l('Find out more', 'pledges/' . $pledge->pledge_id);
 }
 
 function pledges_load_latest() {
@@ -644,9 +660,11 @@ function pledges_block($op = 'list', $delta = 0, $edit = array()) {
       switch ($delta) {
         case 0:
           $pledge = pledges_load_latest();
+          $thumbnail = empty($pledge->thumbnail) ? FALSE :
+            db_fetch_object(db_query('SELECT * FROM files WHERE fid = %d', $pledge->thumbnail));
           $block = array(
             'subject' => t($pledge->title),
-            'content' => theme('pledges_latest_block', $pledge));
+            'content' => theme('pledges_latest_block', $pledge, $thumbnail));
           break;
         case 1:
           $block = array(
