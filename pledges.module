@@ -473,7 +473,12 @@ function pledges_commit_submit($form_id, $form_values) {
 function theme_pledges_page($pledge, $user, $has_made_pledge, $commitments = FALSE) {
   $out .= '<p>' . $pledge->body . '</p>';
   
-  if ($has_made_pledge) {
+  if (pledges_pledge_is_past($pledge)) {
+    $out .= '<hr style="margin: 1em 0px"/>';
+    $out .= "<p><strong style=\"font-size: 120%\">This pledge is no longer active.</strong></p>";
+    $out .= '<hr style="margin: 1em 0px"/>';
+    $out .= '<h3>Pledge Details</h3>';
+  } else  if ($has_made_pledge) {
     $out .= '<p class="pledge-made"><strong>You have made this pledge.</strong></p>';
     $out .= '<hr />';
     $out .= '<h3>Pledge Details</h3>';
