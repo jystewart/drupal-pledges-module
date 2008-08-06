@@ -332,7 +332,7 @@ function pledges_update($node) {
   if ($node->revision) {
     pledges_insert($node);
   } else {
-    pledges_normalize_dates(&$node)
+    pledges_normalize_dates(&$node);
     foreach (array('thumbnail', 'image') as $type) {
       $saved_file = pledges_process_file($type);
       $form_values[$type] = $saved_file ? $saved_file['fid'] : $pledge->$type;
@@ -348,7 +348,7 @@ function pledges_update($node) {
 }
 
 function pledges_insert($node) {
-  pledges_normalize_dates(&$node)
+  pledges_normalize_dates(&$node);
   foreach (array('thumbnail', 'image') as $type) {
     $saved_file = pledges_process_file($type);
     $form_values[$type] = $saved_file ? $saved_file['fid'] : $pledge->$type;
