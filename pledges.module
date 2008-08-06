@@ -19,6 +19,29 @@ function pledges_perm() {
   return array('manage pledges', 'commit to pledges', 'view pledges', 'view all commitments');
 }
 
+/**
+ * Implementation of hook_access
+ */
+function pledges_access($op, $node, $account) {
+  return user_access('manage pledges', $account);
+}
+
+/**
+ * Implements hook_node_info
+ */
+function pledges_node_info() {
+  return array(
+    'pledge' => array(
+      'name' => t('Pledge'),
+      'module' => 'pledges',
+      'description' => t("A pledge"),
+      'has_title' => TRUE,
+      'title_label' => t('Pledge Name'),
+      'has_body' => TRUE,
+      'body_label' => t('Body')
+    )
+  );
+}
 
 /**
  * Implementation of hook_menu
@@ -133,32 +156,36 @@ function theme_pledges_admin_list($pledges) {
   return $out;
 }
 
-function pledges_edit($pledge) {
+function pledges_form($pledge) {
+  $type = node_get_types('type', $pledge);
   $form = array();
   $form['#attributes'] = array('enctype' => "multipart/form-data");
   $form['meta'] = array(
     '#title' => t('Pledge Information'),
     '#type' => 'fieldset');
-  if ($pledge) {
-    $form['meta']['pledge_id'] = array(
-      '#type' => 'hidden',
-      '#default_value' => $pledge->pledge_id);
+  
+  if ($type->has_title) {
+    $form['meta']['title'] = array(
+      '#title' => t('Title'),
+      '#type' => 'textfield',
+      '#description' => t('Give your pledge a name'),
+      '#default_value' => $pledge->title);
   }
-  $form['meta']['title'] = array(
-    '#title' => t('Title'),
-    '#type' => 'textfield',
-    '#description' => t('Give your pledge a name'),
-    '#default_value' => $pledge->title);
+
   $form['meta']['excerpt'] = array(
     '#title' => t('Summary'),
     '#type' => 'textarea',
     '#description' => t('This will be shown in lists and in the pledges block'),
     '#default_value' => $pledge->excerpt);
-  $form['meta']['body'] = array(
-    '#title' => t('Body'),
-    '#type' => 'textarea',
-    '#description' => t('An introduction to your pledge'),
-    '#default_value' => $pledge->body);
+    
+  if ($type->has_body) {
+    $form['meta']['body'] = array(
+      '#title' => t('Body'),
+      '#type' => 'textarea',
+      '#description' => t('An introduction to your pledge'),
+      '#default_value' => $pledge->body);      
+  }
+
   $form['meta']['thankyou_body'] = array(
     '#title' => t('Thank You Page Content'),
     '#type' => 'textarea',
@@ -268,42 +295,19 @@ function pledges_save_file($file) {
   return (array)$file;
 }
 
-function pledges_edit_submit($form_id, $form_values) {
-  # Check if we have an ID 
-  # If we do:
-  # -- UPDATE existing value
-  # Else:
-  $from = sprintf("%04d-%02d-%02d 00:00:00", $form_values['active_from']['year'], 
-    $form_values['active_from']['month'], $form_values['active_from']['day']);
-  $until = sprintf("%04d-%02d-%02d 00:00:00", $form_values['active_until']['year'], 
-    $form_values['active_until']['month'], $form_values['active_until']['day']);
-  
-  $pledge = isset($form_values['pledge_id']) ? pledges_load($form_values['pledge_id']) : new stdClass;
-  foreach (array('thumbnail', 'image') as $type) {
-    $saved_file = pledges_process_file($type);
-    $form_values[$type] = $saved_file ? $saved_file['fid'] : $pledge->$type;
+function pledges_normalize_dates(&$node) {
+  if (is_array($node->active_from)) {
+    $node->active_from = sprintf("%04d-%02d-%02d 00:00:00", $form_values['active_from']['year'], 
+      $form_values['active_from']['month'], $form_values['active_from']['day']);    
   }
+  if (is_array($node->active_until)) {
+    $node->active_until = sprintf("%04d-%02d-%02d 00:00:00", $form_values['active_until']['year'], 
+      $form_values['active_until']['month'], $form_values['active_until']['day']);
+  }
+  
+}
 
-  if (! empty($form_values['pledge_id'])) {
-    $res = db_query("REPLACE INTO {pledges} (`pledge_id`, `title`, `excerpt`, `body`, `thankyou_body`, `active_from`, `active_until`, `make_commitments_public`, `display_totals_publicly`, `thumbnail`, `image`) 
-      VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', %d, %d, '%s', '%s')",
-      $form_values['pledge_id'], $form_values['title'], $form_values['excerpt'], 
-      $form_values['body'], $form_values['thankyou_body'], $from, $until, 
-      $form_values['make_commitments_public'], $form_values['display_totals_publicly'],
-      $form_values['thumbnail'], $form_values['image']);
-    $pledge_id = $form_values['pledge_id'];
-  } else {
-    $pledge_id = db_next_id('pledges');
-    $res = db_query("INSERT INTO {pledges} (`pledge_id`, `title`, `excerpt`, `body`, `thankyou_body`, `active_from`, `active_until`, `created_at`, `make_commitments_public`, `display_totals_publicly`, `thumbnail`, `image`)
-      VALUES (%d, '%s', '%s', '%s', '%s', '%s', '%s', NOW(), %d, %d, '%s', '%s')",
-      $pledge_id, $form_values['title'], $form_values['excerpt'], $form_values['body'], 
-      $form_values['thankyou_body'], $from, $until, $form_values['make_commitments_public'], 
-      $form_values['display_totals_publicly'], $form_values['thumbnail'], $form_values['image']);
-  }
-  
-  # Iterate over pledge options
-  # I can't find a nice way to do this with drupal's form API so am having to
-  # break through to the HTTP response
+function pledges_process_options($node) {
   foreach ($_POST['options'] as $pledge_option) {
     if (! empty($pledge_option['pledge_option_id'])) {
       if (empty($pledge_option['option_name']) && empty($pledge_option['option_description'])) {
@@ -321,8 +325,42 @@ function pledges_edit_submit($form_id, $form_values) {
       }
     }
   }
+  
+}
 
-  return 'admin/settings/pledges';
+function pledges_update($node) {
+  if ($node->revision) {
+    pledges_insert($node);
+  } else {
+    pledges_normalize_dates(&$node)
+    foreach (array('thumbnail', 'image') as $type) {
+      $saved_file = pledges_process_file($type);
+      $form_values[$type] = $saved_file ? $saved_file['fid'] : $pledge->$type;
+    }
+    $res = db_query("UPDATE {pledges} SET `excerpt` = '%s', `thankyou_body` = '%s', `active_from` = '%s', 
+        `active_until` = '%s', `make_commitments_public` = %d, `display_totals_publicly` = %d, 
+        `thumbnail` = '%s', `image` = '%s'
+      WHERE `vid` = %d", $node->excerpt, $node->thankyou_body, $node->active_from, $node->active_until,
+        $node->make_commitments_public, $node->display_totals_publicly, $node->thumbnail, $node->image, $node->vid);
+  }
+  pledges_proces_options($node);
+  
+}
+
+function pledges_insert($node) {
+  pledges_normalize_dates(&$node)
+  foreach (array('thumbnail', 'image') as $type) {
+    $saved_file = pledges_process_file($type);
+    $form_values[$type] = $saved_file ? $saved_file['fid'] : $pledge->$type;
+  }
+
+  $res = db_query("INSERT INTO {pledges} (`vid`, `nid`, `excerpt`, `thankyou_body`, `active_from`, `active_until`,  
+    `make_commitments_public`, `display_totals_publicly`, `thumbnail`, `image`)
+    VALUES (%d, %d, '%s', '%s', '%s', '%s', %d, %d, '%s', '%s')",
+    $node->vid, $node->nid, $form_values['excerpt'], $form_values['thankyou_body'], $from, $until, 
+    $form_values['make_commitments_public'], $form_values['display_totals_publicly'], 
+    $form_values['thumbnail'], $form_values['image']);
+  pledges_proces_options($node);
 }
 
 function pledges_load_by_option_id($option_id) {

@@ -49,3 +49,25 @@ function pledges_update_4() {
   db_query("ALTER TABLE {pledges} ADD COLUMN `thumbnail` int");
   db_query("ALTER TABLE {pledges} ADD COLUMN `image` int");
 }
+
+/* This was the update where we made it a proper node type */
+function pledges_update_5() {
+  db_query("ALTER TABLE {pledges} ADD COLUMN `nid` INT NOT NULL default '0'");
+  db_query("ALTER TABLE {pledges} ADD COLUMN `vid` INT NOT NULL default '0'");
+  
+  $pledges = db_query("SELECT * FROM {pledges}");
+  while ($pledge = db_fetch_object($pledges)) {
+    $new_node = new stdClass;
+    $new_node->type = 'pledges';
+    $new_node->title = $pledge->title;
+    $new_node->body = $pledge->body;
+    node_save($new_node);
+    db_query("UPDATE {pledge_options} SET `nid` = %d WHERE `pledge_id` = %d", $new_node->nid, $new_node->pledge_id);
+  }
+    
+  db_query("ALTER TABLE {pledges} DROP COLUMN `title`");
+  db_query("ALTER TABLE {pledges} DROP COLUMN `body`");
+  db_query("ALTER TABLE {pledges} DROP COLUMN `pledge_id`");
+  db_query("ALTER TABLE {pledges} DROP COLUMN `created_at`");
+  db_query("ALTER TABLE {pledge_options} DROP COLUMN `pledge_id`");
+}
