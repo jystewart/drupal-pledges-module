@@ -21,9 +21,11 @@ function pledges_perm() {
 
 /**
  * Implementation of hook_access
+ *
+ * This is very simple as we don't have a sophisticated add/edit options, just 'manage'
  */
-function pledges_access($op, $node, $account) {
-  return user_access('manage pledges', $account);
+function pledges_access($op, $node) {
+  return user_access('manage pledges');
 }
 
 /**
@@ -147,8 +149,11 @@ function theme_pledges_admin_list($pledges) {
     $out .= '<td>' . date('dS M Y', strtotime($pledge->active_from)) . '</td>';
     $out .= '<td>' . date('dS M Y', strtotime($pledge->active_until)) . '</td>';
     $out .= '<td>' . $pledge->options . '</td>';
-    $out .= '<td><a href="' . url('admin/settings/pledges/edit/' . $pledge->pledge_id) . 
-      '">Edit</a> | <a href="' . url('admin/settings/pledges/delete/' . $pledge->pledge_id) . '">Delete</a> | <a href="' . url('pledges/' . $pledge->pledge_id . '/commitments'). '">View commitments</a></td>';
+    $out .= '<td>';
+    $out .= '<a href="' . url('admin/settings/pledges/edit/' . $pledge->pledge_id) . '">Edit</a> | ';
+    $out .= '<a href="' . url('admin/settings/pledges/delete/' . $pledge->pledge_id) . '">Delete</a> | ';
+    $out .= '<a href="' . url('pledges/' . $pledge->pledge_id . '/commitments') . '">View commitments</a>';
+    $out .= '</td>';
     $out .= '</tr>';
   }
   $out .= '</tbody></table>';
@@ -519,6 +524,19 @@ function pledges_anonymous_user_has_pledged($name, $email, $pledge_option_id) {
 function pledges_email_matches_existing_user($email) {
   $matching_user = user_load(array('mail' => $email));
   return $matching_user ? $matching_user : FALSE;
+}
+
+function pledges_view($node, $teaser = FALSE, $page = FALSE) {
+  if ($teaser) {
+    $node = node_prepare($node, $teaser);
+  } else {
+    $node = node_prepare($node, $teaser);
+    $node->content['options'] = array(
+      '#value' => theme('pledges_options', $node),
+      '#weight' => 2);
+  }
+
+  return $node;
 }
 
 function pledges_commit_validate($form_id, $form_values) {
