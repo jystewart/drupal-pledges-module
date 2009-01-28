@@ -1,5 +1,9 @@
-A module to allow users of a drupal site to make commitments/pledges.
+A module to allow users of a drupal site to make commitments/pledges. The module allows you to define pledges and levels of commitment. Users opt into a pledge at whatever level they feel comfortable with. Commitments are shown on the user profile, blocks are available to promote your pledges on your site, and there are a few other niceties.
 
-More documentation coming soon.
+The code was originally written for a client project and after the initial release I began refactoring it to make it that bit more versatile. In the middle of that process the project was cancelled and the project has been sitting unloved ever since. It should work with Drupal 5, but there may well be serious bugs so only use it if you're prepared to experiment a bit.
 
-Initial development of the module was funded by Operation Noah - http://www.operationnoah.org
+Key items outstanding are:
+
+  * Ensure the process_options() method works with the latest schema
+  * Write an automated test suite
+  * Port to Drupal 6
